@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>acou — 음성 인식 앱</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+    .large-btn { padding: 1rem 2.2rem; border-radius: 1rem; font-size: 1.6rem; }
+  </style>
+</head>
+<body class="bg-white text-gray-900 transition-colors duration-300">
+<div id="root" class="p-6"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+function Acou() {
+  const [listening, setListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [savedSessions, setSavedSessions] = useState([]);
+  const [fontSize, setFontSize] = useState(28);
+  const [category, setCategory] = useState('일상');
+  const [newCategory, setNewCategory] = useState('');
+  const [filterCategory, setFilterCategory] = useState('전체');
+  const [darkMode, setDarkMode] = useState(false);
+  const recognitionRef = useRef(null);
+  const sessionBuffer = useRef('');
+  const STORAGE_KEY = 'acou_sessions';
+
+  // 로컬 저장 불러오기
+  useEffect(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) setSavedSessions(JSON.parse(stored));
+  }, []);
+
+  // 음성 인식 초기화
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) { recognitionRef.current = null; return; }
+
+    const rec = new SpeechRecognition();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'ko-KR';
+
+    rec.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const r = event.results[i];
+        if (r.isFinal) {
+          const finalText = r[0].transcript.trim();
+          sessionBuffer.current += (sessionBuffer.current ? ' ' : '') + finalText;
+          setTranscript(sessionBuffer.current);
+        }
+      }
+    };
+    rec.onerror = (e) => console.error(e);
+    rec.onend = () => setListening(false);
+    recognitionRef.current = rec;
+    return () => { try { rec.stop(); } catch(e){} };
+  }, []);
+
+  const startListening = () => {
+    const rec = recognitionRef.current;
+    if (!rec) return alert('브라우저가 음성 인식을 지원하지 않습니다.');
+    sessionBuffer.current = '';
+    setTranscript('');
+    rec.start();
+    setListening(true);
+  };
+
+  const stopListening = () => {
+    const rec = recognitionRef.current;
+    if (rec) try { rec.stop(); } catch(e){}
+    setListening(false);
+    saveSession(sessionBuffer.current);
+  };
+
+  const saveSession = (text) => {
+    if (!text) return;
+    const now = new Date();
+    const newSession = {
+      id: now.getTime(),
+      date: now.toISOString().slice(0,10),
+      time: now.toISOString(),
+      text,
+      category
+    };
+    const updated = [...savedSessions, newSession];
+    setSavedSessions(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  };
+
+  const deleteSession = (id) => {
+    if (!confirm("정말 삭제하시겠습니까?")) return;
+    const updated = savedSessions.filter(s => s.id !== id);
+    setSavedSessions(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  };
+
+  const toggleDarkMode = () => {
+    setDarkMode(!darkMode);
+    document.body.classList.toggle('bg-gray-900', !darkMode);
+    document.body.classList.toggle('text-white', !darkMode);
+  };
+
+  const addCategory = () => {
+    if (!newCategory.trim()) return;
+    setCategory(newCategory.trim());
+    setNewCategory('');
+  };
+
+  const displayedSessions = filterCategory === '전체'
+    ? savedSessions
+    : savedSessions.filter(s => s.category === filterCategory);
+
+  const categories = ['일상','안내방송','병원'];
+  if (!categories.includes(category)) categories.push(category);
+
+  return (
+    <div className={`max-w-4xl mx-auto transition-colors duration-300 ${darkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'}`}>
+      <header className="flex items-center justify-between mb-6">
+        <h1 className="text-4xl font-bold text-blue-500">acou</h1>
+        <div className="text-right">
+          <div className="text-lg text-gray-600 dark:text-gray-300">"세상의 모든 소리를 당신의 눈앞에"</div>
+        </div>
+      </header>
+
+      <div className="flex items-center gap-4 mb-4 flex-wrap">
+        <label className="font-semibold">카테고리:</label>
+        <select value={category} onChange={e => setCategory(e.target.value)} className="p-2 rounded-lg border border-blue-300">
+          {categories.map(c => <option key={c}>{c}</option>)}
+        </select>
+        <input type="text" value={newCategory} onChange={e=>setNewCategory(e.target.value)} placeholder="새 카테고리" className="p-2 border rounded-lg" />
+        <button onClick={addCategory} className="p-2 border rounded-lg bg-blue-500 text-white">추가</button>
+
+        <button onClick={toggleDarkMode} className="ml-auto p-2 border rounded-lg">{darkMode ? '라이트 모드' : '다크 모드'}</button>
+      </div>
+
+      <section className="flex flex-wrap gap-4 justify-center mb-6">
+        <button onClick={() => listening ? stopListening() : startListening()}
+          className={`large-btn ${listening ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'} shadow-md`}>
+          {listening ? '인식 중지' : '음성 인식 시작'}
+        </button>
+      </section>
+
+      <textarea readOnly value={transcript} placeholder="음성 텍스트가 여기에 표시됩니다..."
+        rows={8} style={{ fontSize: fontSize + 'px' }}
+        className="w-full p-4 rounded-xl border-2 border-blue-300 bg-white dark:bg-gray-800 shadow-inner" />
+
+      <section className="mb-6 p-4 border border-blue-200 rounded-xl mt-4">
+        <div className="flex items-center justify-between mb-3 flex-wrap">
+          <h2 className="text-2xl font-semibold text-blue-500">저장된 세션</h2>
+          <div className="flex items-center gap-2">
+            <label className="mr-2 font-semibold">필터:</label>
+            <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="p-1 rounded-lg border border-blue-300">
+              <option>전체</option>
+              {categories.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {displayedSessions.length === 0 ? (
+          <p className="text-gray-600">선택한 카테고리에 저장된 세션이 없습니다.</p>
+        ) : (
+          <ul className="space-y-3">
+            {displayedSessions.slice().reverse().map((s) => (
+              <li key={s.id} className="p-3 bg-white dark:bg-gray-800 border rounded-lg relative">
+                <div className="text-sm text-gray-500">{new Date(s.time).toLocaleString()} | {s.category}</div>
+                <div className="mt-1 whitespace-pre-wrap">{s.text}</div>
+                <button
+                  onClick={() => deleteSession(s.id)}
+                  className="absolute top-2 right-2 text-red-500 hover:text-red-700 text-sm">
+                  🗑 삭제
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Acou />);
+</script>
+</body>
+</html>
